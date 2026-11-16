@@ -79,11 +79,15 @@ private data class Sign(
     val towards: String,
     val departures: List<Departure>,
     val messages: List<String>,
+    val order: Int,
+    val direction: Int,
 )
 
 private fun signsFor(board: Board): List<Sign> =
     board.departures
-        .groupBy { if (it.stopPointId >= 0) it.stopPointId.toString() else "${it.stopPoint}|${it.platform}" }
+        // Bara lägen som tillhör hållplatserna vi vill visa (SL:s site "Sickla" innehåller även t.ex. Sickla västra)
+        .filter { d -> TARGET_STOPS.any { it.equals(d.stopPoint, ignoreCase = true) } }
+        .groupBy { if (it.stopPointId >= 0) it.stopPointId.toString() else "${it.stopPoint}|${it.platform}|${it.direction}" }
         .map { (key, deps) ->
             val lines = deps.map { it.line }.toSet()
             val msgs = board.disruptions.filter { d ->
@@ -91,15 +95,22 @@ private fun signsFor(board: Board): List<Sign> =
             }.map { (if (it.lines.isNotBlank()) "Linje ${it.lines}: " else "") + it.header } +
                 deps.flatMap { it.notes }
             Sign(
-                key = "${board.site.id}-$key",
-                siteName = board.site.name,
+                key = key,
+                siteName = deps.first().stopPoint,
                 platform = deps.first().platform,
                 towards = deps.map { it.destination }.distinct().take(2).joinToString(", "),
                 departures = deps,
                 messages = msgs.map { it.trim() }.filter { it.isNotBlank() }.distinctBy { it.lowercase() },
+                order = TARGET_STOPS.indexOfFirst { it.equals(deps.first().stopPoint, true) },
+                direction = deps.first().direction,
             )
         }
-        .sortedWith(compareBy({ it.platform ?: "~" }, { it.towards }))
+
+/** Alla skyltar från alla hållplatser, utan dubbletter (samma läge kan ingå i flera SL-sites). */
+private fun allSigns(boards: List<Board>): List<Sign> =
+    boards.flatMap { signsFor(it) }
+        .distinctBy { it.key }
+        .sortedWith(compareBy({ it.order }, { it.platform ?: "~" }, { it.direction }))
 
 /** Antal kolumner så att skyltarna blir så stora som möjligt på en liggande 16:10-skärm. */
 private fun columnsFor(n: Int): Int = when {
@@ -113,7 +124,7 @@ private fun columnsFor(n: Int): Int = when {
 @Composable
 private fun WallScreen(vm: BoardViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
-    val signs = state.boards.flatMap { signsFor(it) }
+    val signs = allSigns(state.boards)
 
     Column(
         Modifier.fillMaxSize().background(Bg).padding(10.dp)
@@ -190,11 +201,9 @@ private fun LedSign(sign: Sign) {
         val h = maxHeight.value
         val hasTicker = sign.messages.isNotEmpty()
 
-        // Textstorlek: ca 30 tecken per rad, men krymp så att minst 3 avgångar får plats
+        // Textstorlek: ca 24 tecken per rad och plats för ~5 avgångar, så stort som möjligt
         val fixedLines = 1.3f + (if (hasTicker) 1.3f else 0f) + 0.9f // rubrik + löptext + marginaler
-        var font = w / 30f
-        if (floor(h / (font * 1.5f) - fixedLines) < 3) font = h / ((3 + fixedLines) * 1.5f)
-        font = min(font, 44f)
+        val font = min(min(w / 24f, h / ((5 + fixedLines) * 1.5f)), 60f)
         val rowsFit = floor(h / (font * 1.5f) - fixedLines).toInt().coerceIn(1, 8)
 
         val fs = with(LocalDensity.current) { font.dp.toSp() }
