@@ -23,7 +23,9 @@ data class Departure(
     val destination: String,
     val display: String,
     val stopPoint: String,
+    val stopPointId: Int,
     val platform: String?,
+    val direction: Int,
     val cancelled: Boolean,
     val notes: List<String>,
 )
@@ -106,6 +108,8 @@ object SlApi {
                     destination = d.optString("destination"),
                     display = d.optString("display"),
                     stopPoint = sp.optString("name"),
+                    stopPointId = sp.optInt("id", -1),
+                    direction = d.optInt("direction_code", 0),
                     platform = sp.optString("designation").takeIf { it.isNotBlank() && it != "null" },
                     cancelled = d.optString("state").equals("CANCELLED", true),
                     notes = (0 until devs.length()).mapNotNull {
